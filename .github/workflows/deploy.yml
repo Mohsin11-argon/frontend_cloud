@@ -11,8 +11,9 @@ concurrency:
   group: frontend-cloud-deploy
   cancel-in-progress: true
 
+# Docker image name is derived from your Docker username, no extra secret needed.
 env:
-  DOCKER_IMAGE: ${{ secrets.DOCKER_IMAGE }}
+  DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/frontend-cloud
 
 jobs:
   build-and-deploy:
