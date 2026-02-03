@@ -1,4 +1,4 @@
-name: Deploy frontend-cloud to EC2 (Nginx)
+name: Deploy frontend-cloud to EC2 (Docker)
 
 on:
   push:
@@ -11,6 +11,9 @@ concurrency:
   group: frontend-cloud-deploy
   cancel-in-progress: true
 
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKER_IMAGE }}
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -19,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Set up Node (for Vite build)
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -29,23 +32,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      - name: Build frontend
         run: npm run build
 
-      - name: Create dist archive
-        run: tar -czf dist.tgz dist
-
-      - name: Upload dist + nginx config to EC2
-        uses: appleboy/scp-action@v0.1.7
+      - name: Log in to Docker registry
+        uses: docker/login-action@v3
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_PORT || 22 }}
-          source: "dist.tgz,nginx/frontend-cloud.conf"
-          target: "/tmp/frontend-cloud/"
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Install/configure Nginx + activate release
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.DOCKER_IMAGE }}:latest
+
+      - name: Deploy container on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -55,26 +58,23 @@ jobs:
           script: |
             set -euo pipefail
 
-            if ! command -v nginx >/dev/null 2>&1; then
-              sudo apt-get update
-              sudo apt-get install -y nginx
+            # Install Docker if missing
+            if ! command -v docker >/dev/null 2>&1; then
+              curl -fsSL https://get.docker.com | sudo sh
+              sudo usermod -aG docker $USER || true
             fi
 
-            sudo mkdir -p /var/www/frontend-cloud/releases /var/www/frontend-cloud/current
+            IMAGE="${DOCKER_IMAGE}:latest"
 
-            # Install/refresh nginx site config
-            sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-            sudo cp /tmp/frontend-cloud/nginx/frontend-cloud.conf /etc/nginx/sites-available/frontend-cloud.conf
-            sudo ln -sf /etc/nginx/sites-available/frontend-cloud.conf /etc/nginx/sites-enabled/frontend-cloud.conf
+            # Pull latest image
+            sudo docker pull "$IMAGE"
 
-            release="/var/www/frontend-cloud/releases/$(date +%Y%m%d%H%M%S)"
-            sudo mkdir -p "$release"
-            sudo tar -xzf /tmp/frontend-cloud/dist.tgz -C "$release"
-            # Replace "current" whether it's a directory or symlink
-            if [ -e /var/www/frontend-cloud/current ] || [ -L /var/www/frontend-cloud/current ]; then
-              sudo rm -rf /var/www/frontend-cloud/current
+            # Stop and remove old container if exists
+            if sudo docker ps -a --format '{{.Names}}' | grep -q '^frontend-cloud$'; then
+              sudo docker stop frontend-cloud || true
+              sudo docker rm frontend-cloud || true
             fi
-            sudo ln -s "$release/dist" /var/www/frontend-cloud/current
-            sudo nginx -t
-            sudo systemctl reload nginx
+
+            # Run new container on host port 8080 -> container 8080
+            sudo docker run -d --name frontend-cloud -p 8080:8080 "$IMAGE"
 
