@@ -70,7 +70,10 @@ jobs:
             release="/var/www/frontend-cloud/releases/$(date +%Y%m%d%H%M%S)"
             sudo mkdir -p "$release"
             sudo tar -xzf /tmp/frontend-cloud/dist.tgz -C "$release"
-            sudo rm -f /var/www/frontend-cloud/current
+            # Replace "current" whether it's a directory or symlink
+            if [ -e /var/www/frontend-cloud/current ] || [ -L /var/www/frontend-cloud/current ]; then
+              sudo rm -rf /var/www/frontend-cloud/current
+            fi
             sudo ln -s "$release/dist" /var/www/frontend-cloud/current
             sudo nginx -t
             sudo systemctl reload nginx
