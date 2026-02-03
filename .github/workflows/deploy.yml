@@ -11,10 +11,6 @@ concurrency:
   group: frontend-cloud-deploy
   cancel-in-progress: true
 
-# Docker image name is derived from your Docker username, no extra secret needed.
-env:
-  DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/frontend-cloud
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -47,7 +43,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.DOCKER_IMAGE }}:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/frontend-cloud:latest
 
       - name: Deploy container on EC2
         uses: appleboy/ssh-action@v1.0.3
@@ -65,7 +61,7 @@ jobs:
               sudo usermod -aG docker $USER || true
             fi
 
-            IMAGE="${DOCKER_IMAGE}:latest"
+            IMAGE="${{ secrets.DOCKER_USERNAME }}/frontend-cloud:latest"
 
             # Pull latest image
             sudo docker pull "$IMAGE"
